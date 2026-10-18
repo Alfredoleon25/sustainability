@@ -1,0 +1,1694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Highground — flood response for cities and rural places</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root {
+    --bg: #0a0f1d;
+    --panel: #111827;
+    --panel2: #0f1626;
+    --line: #1f2a44;
+    --text: #e6ebf5;
+    --muted: #8b95ad;
+    --green: #22c55e;
+    --blue: #38bdf8;
+    --red: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 10px 18px; border-bottom: 1px solid var(--line);
+  }
+  .brand h1 { margin: 0; font-size: 22px; letter-spacing: 0.4px; }
+  .brand span { color: var(--muted); font-size: 12.5px; }
+  .hstats { display: flex; gap: 18px; align-items: center; }
+  .hstat { text-align: right; }
+  .hstat b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .hstat span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+  main { display: grid; grid-template-columns: 1fr 400px; min-height: 0; }
+  .mapwrap { position: relative; min-height: 0; }
+  #map { position: absolute; inset: 0; background: var(--bg); }
+  #map.rain-mode { cursor: crosshair; }
+  .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.8) contrast(0.9) saturate(0.4); }
+  .flood-layer { image-rendering: pixelated; }
+
+  .toolbar {
+    position: absolute; top: 12px; left: 12px; z-index: 500;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    background: rgba(10, 15, 29, 0.9);
+    border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px;
+    max-width: calc(100% - 24px);
+  }
+  .toolbar .sep { width: 1px; height: 24px; background: var(--line); }
+  .toolbar label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  button, select {
+    background: #1b2542; color: var(--text);
+    border: 1px solid #2f3c66; border-radius: 8px;
+    padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { background: #24315a; }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  button.primary { background: #2563eb; border-color: #2563eb; }
+  button.active { background: #0e7490; border-color: #22d3ee; }
+  button.danger { background: #7f1d1d; border-color: #b91c1c; }
+  .legend {
+    position: absolute; left: 12px; bottom: 26px; z-index: 500;
+    background: rgba(10, 15, 29, 0.9); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 10px; font-size: 11.5px; color: var(--muted);
+    display: grid; grid-template-columns: auto auto; gap: 4px 16px;
+  }
+  .legend .lg-h { color: var(--text); font-weight: 600; font-size: 11px; }
+  .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .legend .dot { border-radius: 50%; }
+
+  aside { border-left: 1px solid var(--line); overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .card h2 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); display: flex; justify-content: space-between; }
+  .empty { color: var(--muted); font-size: 13px; line-height: 1.45; }
+  .sel-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .sel-title b { font-size: 16px; }
+  .pill { font-size: 11px; padding: 2px 9px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+  .factors { display: grid; grid-template-columns: 1fr auto; gap: 5px 10px; font-size: 12.5px; margin-top: 8px; }
+  .factors span:nth-child(odd) { color: var(--muted); }
+  .factors span:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; }
+  .phone { margin-top: 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .phone .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+  .phone .native { font-size: 16px; margin: 6px 0 4px; }
+  .phone .eng { font-size: 13px; line-height: 1.45; }
+  .story { margin-top: 8px; }
+  .story .step { margin: 0 0 12px; font-size: 14px; line-height: 1.5; }
+  .story .step:last-child { margin-bottom: 0; }
+  .story .k { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 3px; font-weight: 700; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .actions button { font-size: 12.5px; padding: 6px 10px; }
+  .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; text-align: center; }
+  .flow div { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 2px; }
+  .flow b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .flow span { font-size: 10.5px; color: var(--muted); }
+
+  .q { display: grid; grid-template-columns: 26px 1fr auto; gap: 2px 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); font-size: 12.5px; cursor: pointer; }
+  .q:first-child { border-top: none; }
+  .q .rank { font-weight: 700; color: var(--muted); }
+  .q .why { grid-column: 2 / -1; color: var(--muted); font-size: 11.5px; }
+  .q .sc { font-weight: 700; color: var(--red); font-variant-numeric: tabular-nums; }
+  .teams { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; }
+  .teams b { color: var(--text); }
+
+  .feed { font-size: 12.3px; max-height: 300px; overflow-y: auto; }
+  .feed div { padding: 5px 0; border-top: 1px solid var(--line); line-height: 1.35; }
+  .feed div:first-child { border-top: none; }
+  .feed time { color: var(--muted); margin-right: 6px; font-variant-numeric: tabular-nums; }
+  .feed .warn { color: var(--blue); }
+  .feed .bad { color: #fca5a5; }
+  .feed .good { color: #86efac; }
+
+  .team-icon {
+    background: #f1f5f9; color: #0a0f1d; font-size: 9px; font-weight: 800;
+    border: 1.5px solid #0a0f1d; border-radius: 4px; text-align: center; line-height: 13px;
+  }
+  .leaflet-tooltip.boro-label {
+    background: transparent; border: none; box-shadow: none; color: #e6ebf5;
+    font-weight: 800; font-size: 13px; letter-spacing: 1.2px; text-transform: uppercase;
+    text-shadow: 0 0 6px #0a0f1d, 0 0 6px #0a0f1d, 0 1px 0 #0a0f1d; padding: 0;
+  }
+  .leaflet-tooltip.boro-label::before { display: none; }
+  .leaflet-tooltip.count-label {
+    background: transparent; border: none; box-shadow: none; color: #0a0f1d;
+    font-weight: 800; font-size: 10px; padding: 0;
+  }
+  .leaflet-tooltip.count-label::before { display: none; }
+  .note { font-size: 11px; color: var(--muted); line-height: 1.4; }
+  .brand h1 { cursor: pointer; }
+  #start {
+    position: fixed; inset: 0; z-index: 3000;
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: 48px 32px 56px;
+    background: #030712 url("highground-start.jpg") center / cover no-repeat;
+  }
+  #start::before {
+    content: "";
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(180deg, rgba(3, 7, 18, 0.28) 0%, rgba(3, 7, 18, 0.18) 32%, rgba(3, 7, 18, 0.55) 62%, rgba(3, 7, 18, 0.88) 100%),
+      radial-gradient(ellipse at 50% 120%, rgba(8, 47, 73, 0.35), transparent 55%);
+    pointer-events: none;
+  }
+  #start::after {
+    content: "";
+    position: absolute; inset: 0;
+    background-image: repeating-linear-gradient(
+      185deg,
+      transparent 0 12px,
+      rgba(186, 230, 253, 0.035) 12px 13px,
+      transparent 13px 28px
+    );
+    animation: rain 1.1s linear infinite;
+    pointer-events: none;
+    opacity: 0.7;
+  }
+  @keyframes rain {
+    from { background-position: 0 0; }
+    to { background-position: 18px 120px; }
+  }
+  #start.hide { display: none; }
+  .start-inner { position: relative; z-index: 1; width: min(860px, 100%); }
+  .start-inner h1 {
+    margin: 0;
+    font-size: 72px;
+    letter-spacing: -1px;
+    text-shadow: 0 8px 40px rgba(0, 0, 0, 0.55);
+  }
+  .start-inner .tag {
+    margin: 8px 0 10px;
+    font-size: 22px;
+    color: #e8eefc;
+    text-shadow: 0 2px 16px rgba(0, 0, 0, 0.5);
+  }
+  .start-inner .lead {
+    margin: 0 0 28px;
+    max-width: 560px;
+    font-size: 16px;
+    line-height: 1.55;
+    color: #c5cee0;
+  }
+  .start-picks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .start-pick {
+    text-align: left;
+    background: rgba(10, 16, 32, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 18px;
+    padding: 26px 24px 24px;
+    cursor: pointer;
+    width: 100%;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+    transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  }
+  .start-pick:hover {
+    background: rgba(18, 28, 52, 0.78);
+    border-color: rgba(56, 189, 248, 0.55);
+    transform: translateY(-2px);
+  }
+  .start-pick b { display: block; font-size: 32px; letter-spacing: -0.4px; }
+  .start-pick span { display: block; margin-top: 8px; font-size: 15px; line-height: 1.45; color: #c9d4ea; font-weight: 400; }
+  @media (max-width: 720px) {
+    .start-inner h1 { font-size: 44px; }
+    .start-picks { grid-template-columns: 1fr; }
+    #start { align-items: center; padding: 28px 18px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1 id="brand">Highground</h1>
+    <span id="brand-sub">Flood response for basement apartments · one borough at a time · real ground heights</span>
+  </div>
+  <div class="hstats">
+    <div class="hstat"><b id="h-clock">8:00pm</b><span id="h-clock-lbl">time</span></div>
+    <div class="hstat"><b id="h-rain">0.0</b><span>peak rain in/hr</span></div>
+    <div class="hstat"><b id="h-called">0</b><span>people called</span></div>
+    <div class="hstat"><b id="h-moving" style="color:var(--blue)">0</b><span id="lbl-moving">leaving basements</span></div>
+    <div class="hstat"><b id="h-safe" style="color:var(--green)">0</b><span>reached dry ground</span></div>
+    <div class="hstat"><b id="h-wait" style="color:var(--red)">0</b><span>waiting for rescue</span></div>
+    <div class="hstat"><b id="h-rescued" style="color:var(--green)">0</b><span>rescued</span></div>
+    <div class="hstat"><b id="h-lead">–</b><span>avg warning</span></div>
+  </div>
+</header>
+
+<main>
+  <div class="mapwrap">
+    <div id="map"></div>
+
+    <div class="toolbar">
+      <button class="primary" id="play" disabled>Loading…</button>
+      <div class="sep"></div>
+      <label>Place
+        <select id="place">
+          <option value="nyc" selected>New York</option>
+          <option value="hindman">Kentucky</option>
+        </select>
+      </label>
+      <label>Area
+        <select id="area" disabled>
+          <option value="" selected>All of New York</option>
+          <option value="queens">Queens</option>
+          <option value="brooklyn">Brooklyn</option>
+          <option value="manhattan">Manhattan</option>
+          <option value="bronx">the Bronx</option>
+          <option value="staten">Staten Island</option>
+        </select>
+      </label>
+      <button id="reset" disabled>Reset</button>
+    </div>
+
+    <div class="legend">
+      <b class="lg-h">This area</b><b class="lg-h">The people</b>
+      <span><i style="background:#22c55e"></i>Stays dry next 30 min</span>
+      <span><i class="dot" style="background:#22c55e"></i>Reached dry ground</span>
+      <span><i style="background:#38bdf8"></i>Water rising</span>
+      <span><i class="dot" style="background:#38bdf8"></i><span id="lg-leaving">Leaving basements</span></span>
+      <span><i style="background:#ef4444"></i>Serious flooding</span>
+      <span><i class="dot" style="background:#ef4444"></i>Waiting for rescue</span>
+    </div>
+  </div>
+
+  <aside>
+    <section class="card">
+      <h2>Selected</h2>
+      <div id="sel"></div>
+    </section>
+
+    <section class="card">
+      <h2><span>Rescue teams</span><span id="queueCount"></span></h2>
+      <div class="teams" id="teams"></div>
+      <div id="queue"></div>
+    </section>
+
+    <section class="card">
+      <h2>Live feed</h2>
+      <div class="feed" id="feed"></div>
+    </section>
+
+    <div class="note" id="foot-note">Click a block to query Chalk. Rain is NOAA GOES-19, the East Coast weather satellite SpaceX launched. Chalk joins that rain with 311 flood history and ground height, then decides call or rescue. Starlink is for places without cell, not for New York. Ground heights are real. The storm replay is for demonstration.</div>
+  </aside>
+</main>
+
+<div id="start">
+  <div class="start-inner">
+    <h1>Highground</h1>
+    <p class="tag">Flood response for cities and rural places.</p>
+    <p class="lead">We call people before the water hits. We tell them the walk to dry ground. If they never leave, we send rescue. Same product. Different reach.</p>
+    <div class="start-picks">
+      <button class="start-pick" id="pick-cities" type="button">
+        <b>Cities</b>
+        <span>Basements. Cell still works. We call, then we show the walk out.</span>
+      </button>
+      <button class="start-pick" id="pick-rural" type="button">
+        <b>Rural</b>
+        <span>Homes on the creek. No cell. The call rides Starlink.</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const ROWS = 140, COLS = 150, N = ROWS * COLS;
+const KM_PER_LAT = 111;
+const HORIZON = 30;
+const RUNOFF = 14;
+const FLOOD_FT = 0.35;
+const TICK_MS = 450;
+const MAX_RAIN_IN_HR = 4.2;
+const WALK_M_PER_MIN = 80;
+const SLOW_WALK_M_PER_MIN = 30;
+const STILL_LIMIT = 8;
+const SHARE_CANT_WALK = 0.05;
+const SHARE_NO_ANSWER = 0.12;
+const SHARE_STUCK = 0.08;
+const TEAM_CAPACITY = 20;
+const TEAM_KM_PER_MIN = 0.9;
+const TEAM_ONSITE_MIN = 3;
+const GREEN = [34, 197, 94], BLUE = [56, 189, 248], RED = [239, 68, 68];
+const HEX = { green: "#22c55e", blue: "#38bdf8", red: "#ef4444" };
+
+function locateNyc(lat, lng) {
+  const west = -74.02 + (lat - 40.70) * 0.53;
+  const east = -73.97 + (lat - 40.70) * 0.35;
+  if (lat >= 40.70 && lat <= 40.88 && lng >= west && lng <= east) return "Manhattan";
+  if (lng < -74.05 && lat < 40.65) return "Staten Island";
+  if (lat > 40.80) return "the Bronx";
+  const line = Math.min(-73.855, -73.955 + (40.737 - lat) * 1.149);
+  if (lat < 40.74 && lng < line) return "Brooklyn";
+  return "Queens";
+}
+
+function locateNearest(lat, lng) {
+  let best = "", bestD = Infinity;
+  for (const a of Object.values(place.areas)) {
+    const [[lat0, lng0], [lat1, lng1]] = a.bounds;
+    if (lat >= lat0 && lat <= lat1 && lng >= lng0 && lng <= lng1) return a.match;
+    const d = Math.hypot((lat - a.lat) * KM_PER_LAT, (lng - a.lng) * KM_PER_LNG);
+    if (d < bestD) { bestD = d; best = a.match; }
+  }
+  return best;
+}
+
+const PLACES = {
+  nyc: {
+    id: "nyc",
+    LAT0: 40.49, LAT1: 40.92, LNG0: -74.26, LNG1: -73.69,
+    elevZoom: 11,
+    people: 100000,
+    teams: 12,
+    seed: 20210901,
+    startMin: 20 * 60,
+    overview: [40.71, -73.98],
+    overviewZoom: 10,
+    areaZoom: 12,
+    starlink: false,
+    use311: true,
+    many: "basement apartments",
+    one: "basement",
+    leaving: "leaving basements",
+    menuLabel: "New York",
+    sub: "Cities · New York · basement apartments · cell still works",
+    note: "Click a block to query Chalk. Rain is NOAA GOES-19, the East Coast weather satellite SpaceX launched. Chalk joins that rain with 311 flood history and ground height, then decides call or rescue. Starlink is for places without cell, not for New York. Ground heights are real. The storm replay is for demonstration.",
+    overviewLabel: "All of New York",
+    pickHint: "This is all of New York. Pick a borough in Area to zoom in, then press Play.",
+    looking: name => `You are looking at ${name}. Click a block to see how many people live in basements there. A line appears only after you click, and it points straight to dry ground.`,
+    watchLog: "This is New York. Pick a borough, then press Play.",
+    storm: "Hurricane Ida",
+    stormWhen: "the night of September 1, 2021",
+    rainNote: "Rain is NOAA GOES-19, the weather satellite over this coast. SpaceX launched it.",
+    locate: locateNyc,
+    labels: [
+      { name: "Manhattan", lat: 40.78, lng: -73.97 },
+      { name: "Brooklyn", lat: 40.65, lng: -73.95 },
+      { name: "Queens", lat: 40.73, lng: -73.80 },
+      { name: "the Bronx", lat: 40.85, lng: -73.87 },
+      { name: "Staten Island", lat: 40.58, lng: -74.15 },
+    ],
+    areas: {
+      queens:    { match: "Queens",        label: "Queens",        lat: 40.72, lng: -73.82, bounds: [[40.54, -73.96], [40.81, -73.70]] },
+      brooklyn:  { match: "Brooklyn",      label: "Brooklyn",      lat: 40.65, lng: -73.95, bounds: [[40.57, -74.05], [40.74, -73.83]] },
+      manhattan: { match: "Manhattan",     label: "Manhattan",     lat: 40.78, lng: -73.97, bounds: [[40.70, -74.04], [40.88, -73.91]] },
+      bronx:     { match: "the Bronx",     label: "the Bronx",     lat: 40.85, lng: -73.87, bounds: [[40.79, -73.93], [40.92, -73.75]] },
+      staten:    { match: "Staten Island", label: "Staten Island", lat: 40.58, lng: -74.15, bounds: [[40.49, -74.26], [40.65, -74.05]] },
+    },
+  },
+  hindman: {
+    id: "hindman",
+    LAT0: 37.27, LAT1: 37.41, LNG0: -83.08, LNG1: -82.84,
+    elevZoom: 12,
+    people: 3500,
+    teams: 6,
+    seed: 20220728,
+    startMin: 2 * 60,
+    overview: [37.335, -82.981],
+    overviewZoom: 12,
+    areaZoom: 14,
+    starlink: true,
+    use311: false,
+    many: "homes along the creek",
+    one: "creek house",
+    leaving: "leaving the hollow",
+    menuLabel: "Kentucky",
+    sub: "Rural · Kentucky · homes along the creek · Starlink is how the call lands",
+    note: "Click a house to query Chalk. Rain is NOAA GOES-19, the weather satellite SpaceX launched. Cell does not work in these hollows — about a third of Knott County has no broadband. The call rides Starlink. Ground heights are real. The storm replay is the July 2022 flood, for demonstration.",
+    overviewLabel: "All of Kentucky",
+    pickHint: "This is Kentucky. Pick Hindman in Area, then press Play.",
+    looking: name => `You are looking at ${name}. Click a house along the creek. The white line is the walk uphill. That call rides Starlink.`,
+    watchLog: "This is Kentucky. Pick Hindman, then press Play.",
+    storm: "the July 2022 flood",
+    stormWhen: "the morning of July 28, 2022",
+    rainNote: "Rain is NOAA GOES-19, the weather satellite SpaceX launched. Cell is dead in this hollow, so Starlink is how we reach them.",
+    locate: locateNearest,
+    labels: [
+      { name: "Hindman", lat: 37.335, lng: -82.981 },
+      { name: "Pippa Passes", lat: 37.335, lng: -82.876 },
+      { name: "Montgomery Creek", lat: 37.355, lng: -83.01 },
+      { name: "Carrie", lat: 37.312, lng: -82.985 },
+    ],
+    areas: {
+      hindman:     { match: "Hindman",          label: "Hindman",          lat: 37.335, lng: -82.981, bounds: [[37.32, -83.02], [37.35, -82.94]] },
+      montgomery:  { match: "Montgomery Creek", label: "Montgomery Creek", lat: 37.355, lng: -83.01,  bounds: [[37.35, -83.08], [37.41, -82.96]] },
+      pippa:       { match: "Pippa Passes",     label: "Pippa Passes",     lat: 37.335, lng: -82.876, bounds: [[37.31, -82.92], [37.37, -82.84]] },
+      carrie:      { match: "Carrie",           label: "Carrie",           lat: 37.312, lng: -82.985, bounds: [[37.27, -83.06], [37.32, -82.94]] },
+    },
+  },
+};
+
+let place = PLACES.nyc;
+let LAT0, LAT1, LNG0, LNG1, D_LAT, D_LNG, KM_PER_LNG, CELL_M;
+
+function applyBounds() {
+  LAT0 = place.LAT0; LAT1 = place.LAT1; LNG0 = place.LNG0; LNG1 = place.LNG1;
+  D_LAT = (LAT1 - LAT0) / ROWS;
+  D_LNG = (LNG1 - LNG0) / COLS;
+  KM_PER_LNG = 111 * Math.cos(((LAT0 + LAT1) / 2) * Math.PI / 180);
+  CELL_M = Math.round(((D_LAT * KM_PER_LAT + D_LNG * KM_PER_LNG) / 2) * 1000);
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    cLat[idx(r, c)] = LAT0 + (r + 0.5) * D_LAT;
+    cLng[idx(r, c)] = LNG0 + (c + 0.5) * D_LNG;
+  }
+}
+
+function placeName(lat, lng) {
+  return place.locate(lat, lng);
+}
+
+const idx = (r, c) => r * COLS + c;
+const rowOf = i => Math.floor(i / COLS);
+const colOf = i => i % COLS;
+const fmt = n => Math.round(n).toLocaleString("en-US");
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hash2(i, j) {
+  let h = (Math.imul(i, 374761393) + Math.imul(j, 668265263)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+function vnoise(x, y) {
+  const i = Math.floor(x), j = Math.floor(y);
+  const fx = x - i, fy = y - j;
+  const s = t => t * t * (3 - 2 * t);
+  const a = hash2(i, j), b = hash2(i + 1, j), c = hash2(i, j + 1), d = hash2(i + 1, j + 1);
+  const u = s(fx), v = s(fy);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+
+const cLat = new Float64Array(N), cLng = new Float64Array(N);
+applyBounds();
+
+const elev = new Float32Array(N);
+const isLand = new Uint8Array(N);
+const cap = new Float32Array(N);
+const pop = new Float32Array(N);
+const pastFlood = new Float32Array(N);
+let land = new Int32Array(0);
+let active = new Int32Array(0);
+const inArea = new Uint8Array(N);
+let currentArea = "";
+let areaPeople = 0;
+
+async function loadElevation() {
+  const z = place.elevZoom;
+  const lon2x = lon => (lon + 180) / 360 * 2 ** z;
+  const lat2y = lat => { const r = lat * Math.PI / 180; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 2 ** z; };
+  const x0 = Math.floor(lon2x(LNG0)), x1 = Math.floor(lon2x(LNG1));
+  const y0 = Math.floor(lat2y(LAT1)), y1 = Math.floor(lat2y(LAT0));
+  const w = (x1 - x0 + 1) * 256, h = (y1 - y0 + 1) * 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const g = canvas.getContext("2d", { willReadFrequently: true });
+  const jobs = [];
+  for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+    jobs.push(new Promise(resolve => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      const done = () => { try { g.drawImage(img, (x - x0) * 256, (y - y0) * 256); } catch (_) {} resolve(); };
+      img.onload = done;
+      img.onerror = resolve;
+      setTimeout(resolve, 2500);
+      img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
+    }));
+  }
+  await Promise.all(jobs);
+  const data = g.getImageData(0, 0, w, h).data;
+  const sample = (lat, lng) => {
+    const px = Math.min(w - 1, Math.max(0, Math.floor((lon2x(lng) - x0) * 256)));
+    const py = Math.min(h - 1, Math.max(0, Math.floor((lat2y(lat) - y0) * 256)));
+    const k = (py * w + px) * 4;
+    return data[k] * 256 + data[k + 1] + data[k + 2] / 256 - 32768;
+  };
+  const landList = [];
+  for (let i = 0; i < N; i++) {
+    let sum = 0, wet = 0;
+    for (const [dy, dx] of [[0, 0], [0.3, 0.3], [-0.3, 0.3], [0.3, -0.3], [-0.3, -0.3]]) {
+      const m = sample(cLat[i] + dy * D_LAT, cLng[i] + dx * D_LNG);
+      sum += m;
+      if (m <= 0.5) wet++;
+    }
+    const meters = sum / 5;
+    elev[i] = meters * 3.281;
+    isLand[i] = wet <= 2 && meters > 0.5 ? 1 : 0;
+    if (isLand[i]) landList.push(i);
+  }
+  land = Int32Array.from(landList);
+}
+
+function buildCity() {
+  let total = 0;
+  let minE = Infinity, maxE = -Infinity;
+  for (const i of land) { if (elev[i] < minE) minE = elev[i]; if (elev[i] > maxE) maxE = elev[i]; }
+  for (const i of land) {
+    const r = rowOf(i), c = colOf(i);
+    const x = c / COLS, y = r / ROWS;
+    cap[i] = 1.2 + 0.65 * vnoise(x * 9 + 11, y * 9 + 7);
+    const density = Math.pow(vnoise(x * 14 + 3, y * 14 + 5), 1.6);
+    if (place.starlink) {
+      const low = (maxE - elev[i]) / Math.max(1, maxE - minE);
+      pop[i] = low > 0.62 ? density * Math.pow(low, 1.4) : 0;
+    } else {
+      const dKm = Math.hypot((cLat[i] - 40.758) * KM_PER_LAT, (cLng[i] - -73.985) * KM_PER_LNG);
+      const fromMidtown = Math.min(1, Math.max(0.05, (dKm - 4) / 10));
+      pop[i] = density * fromMidtown;
+    }
+    total += pop[i];
+  }
+  if (place.starlink) {
+    pop.fill(0);
+    total = 0;
+    for (const a of Object.values(place.areas)) {
+      const cells = [];
+      for (const i of land) if (placeName(cLat[i], cLng[i]) === a.match) cells.push(i);
+      cells.sort((x, y) => elev[x] - elev[y]);
+      const keep = Math.min(30, cells.length);
+      for (let k = 0; k < keep; k++) {
+        pop[cells[k]] = keep - k;
+        total += pop[cells[k]];
+      }
+    }
+  }
+  for (const i of land) pop[i] = total > 0 ? (pop[i] / total) * place.people : 0;
+}
+
+function applyPastFloodCap() {
+  for (const i of land) {
+    if (pastFlood[i] <= 0) continue;
+    cap[i] *= 1 / (1 + 0.18 * Math.min(pastFlood[i], 10));
+  }
+}
+
+function markCreekFloods() {
+  pastFlood.fill(0);
+  const vals = [];
+  for (const i of land) vals.push(elev[i]);
+  vals.sort((a, b) => a - b);
+  const cut = vals[Math.floor(vals.length * 0.18)] || 0;
+  for (const i of land) if (elev[i] <= cut) pastFlood[i] = 2;
+  applyPastFloodCap();
+}
+
+async function loadPastFloods() {
+  const url = "https://data.cityofnewyork.us/resource/erm2-nwe9.json?" + new URLSearchParams({
+    $select: "latitude,longitude",
+    $where: "latitude IS NOT NULL AND descriptor like '%Flood%'",
+    $limit: "8000",
+  });
+  const rows = await fetch(url, { signal: AbortSignal.timeout(4000) }).then(r => {
+    if (!r.ok) throw new Error("311");
+    return r.json();
+  });
+  pastFlood.fill(0);
+  for (const row of rows) {
+    const lat = Number(row.latitude), lng = Number(row.longitude);
+    if (!lat || !lng) continue;
+    const r = Math.floor((lat - LAT0) / D_LAT), c = Math.floor((lng - LNG0) / D_LNG);
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+    const i = idx(r, c);
+    if (isLand[i]) pastFlood[i] += 1;
+  }
+  applyPastFloodCap();
+}
+
+let t = 0;
+let storms = [];
+let depth = new Float32Array(N);
+const rainNow = new Float32Array(N);
+const pred = new Float32Array(N);
+const predCross = new Float32Array(N);
+const safeZone = new Uint8Array(N);
+const walkDist = new Float32Array(N);
+const walkNext = new Int32Array(N);
+const lockedDest = new Int32Array(N);
+const lockedDist = new Float32Array(N);
+const lockedPath = new Map();
+walkNext.fill(-1);
+lockedDest.fill(-1);
+lockedDist.fill(Infinity);
+
+const calledAt = new Int16Array(N);
+const floodedAt = new Int16Array(N);
+const moving = new Float32Array(N);
+const arriveAt = new Int16Array(N);
+const noAnswer = new Float32Array(N);
+const waiting = new Float32Array(N);
+const waitSince = new Int16Array(N);
+const safe = new Float32Array(N);
+const rescued = new Float32Array(N);
+
+let feed = [];
+let teams = [];
+let selected = null;
+let timer = null;
+let lastSummary = 0;
+let waitingCleared = false;
+
+function stormEnvelope(s) {
+  if (s.age < 0 || s.age > s.life) return 0;
+  const a = s.age / s.life;
+  return a < 0.2 ? a / 0.2 : (1 - a) / 0.8;
+}
+
+function rainField(list, out) {
+  out.fill(0);
+  for (const s of list) {
+    const env = stormEnvelope(s);
+    if (env <= 0) continue;
+    const reachKm = s.radius * 3;
+    const r0 = Math.max(0, Math.floor((s.lat - reachKm / KM_PER_LAT - LAT0) / D_LAT));
+    const r1 = Math.min(ROWS - 1, Math.floor((s.lat + reachKm / KM_PER_LAT - LAT0) / D_LAT));
+    const c0 = Math.max(0, Math.floor((s.lng - reachKm / KM_PER_LNG - LNG0) / D_LNG));
+    const c1 = Math.min(COLS - 1, Math.floor((s.lng + reachKm / KM_PER_LNG - LNG0) / D_LNG));
+    const twoSig2 = 2 * s.radius * s.radius;
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      const i = idx(r, c);
+      const dy = (cLat[i] - s.lat) * KM_PER_LAT, dx = (cLng[i] - s.lng) * KM_PER_LNG;
+      out[i] += s.peak * env * Math.exp(-(dx * dx + dy * dy) / twoSig2);
+    }
+  }
+  for (let i = 0; i < N; i++) if (out[i] > MAX_RAIN_IN_HR) out[i] = MAX_RAIN_IN_HR;
+}
+
+function advanceStorms(list) {
+  for (const s of list) {
+    s.age += 1;
+    if (s.age > 0) { s.lat += s.vLat; s.lng += s.vLng; }
+  }
+}
+
+const scratchRain = new Float32Array(N);
+const scratchDelta = new Float32Array(N);
+
+function stepWater(d, rain) {
+  for (const i of active) {
+    const excess = rain[i] - cap[i];
+    if (excess > 0) d[i] += (excess / 720) * RUNOFF;
+    else if (d[i] > 0) d[i] = Math.max(0, d[i] + (excess / 720) * 3 - 0.003);
+  }
+  scratchDelta.fill(0);
+  for (const i of active) {
+    if (d[i] < 1e-4) continue;
+    const r = rowOf(i), c = colOf(i);
+    const head = elev[i] + d[i];
+    let best = -1, bestHead = head;
+    const consider = j => {
+      const h = isLand[j] ? elev[j] + d[j] : -1000;
+      if (h < bestHead) { bestHead = h; best = j; }
+    };
+    if (r > 0) consider(i - COLS);
+    if (r < ROWS - 1) consider(i + COLS);
+    if (c > 0) consider(i - 1);
+    if (c < COLS - 1) consider(i + 1);
+    if (best >= 0) {
+      const m = Math.min(d[i], (head - bestHead) / 2) * 0.5;
+      scratchDelta[i] -= m;
+      if (isLand[best]) scratchDelta[best] += m;
+    }
+  }
+  for (const i of active) d[i] = Math.max(0, d[i] + scratchDelta[i]);
+}
+
+function predict() {
+  const d = depth.slice();
+  const list = storms.map(s => ({ ...s }));
+  pred.set(depth);
+  predCross.fill(Infinity);
+  for (const i of active) if (depth[i] >= FLOOD_FT) predCross[i] = 0;
+  for (let k = 1; k <= HORIZON; k++) {
+    advanceStorms(list);
+    rainField(list, scratchRain);
+    stepWater(d, scratchRain);
+    for (const i of active) {
+      if (d[i] > pred[i]) pred[i] = d[i];
+      if (d[i] >= FLOOD_FT && predCross[i] === Infinity) predCross[i] = k;
+    }
+  }
+}
+
+class MinHeap {
+  constructor() { this.p = []; this.v = []; }
+  get size() { return this.v.length; }
+  push(p, v) {
+    const P = this.p, V = this.v; P.push(p); V.push(v);
+    let i = V.length - 1;
+    while (i > 0) {
+      const q = (i - 1) >> 1;
+      if (P[q] <= P[i]) break;
+      [P[q], P[i]] = [P[i], P[q]]; [V[q], V[i]] = [V[i], V[q]]; i = q;
+    }
+  }
+  pop() {
+    const P = this.p, V = this.v;
+    const top = [P[0], V[0]];
+    const lp = P.pop(), lv = V.pop();
+    if (V.length) {
+      P[0] = lp; V[0] = lv;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1, r = l + 1; let m = i;
+        if (l < V.length && P[l] < P[m]) m = l;
+        if (r < V.length && P[r] < P[m]) m = r;
+        if (m === i) break;
+        [P[m], P[i]] = [P[i], P[m]]; [V[m], V[i]] = [V[i], V[m]]; i = m;
+      }
+    }
+    return top;
+  }
+}
+
+const walkable = j => inArea[j] && isLand[j] && pred[j] < 0.4 && depth[j] < 0.25;
+
+function updateEscapeRoutes() {
+  walkDist.fill(Infinity);
+  walkNext.fill(-1);
+  const heap = new MinHeap();
+  for (const i of active) {
+    safeZone[i] = pred[i] < 0.05 && depth[i] < 0.02 ? 1 : 0;
+    if (safeZone[i]) { walkDist[i] = 0; heap.push(0, i); }
+  }
+  while (heap.size) {
+    const [dcur, i] = heap.pop();
+    if (dcur > walkDist[i]) continue;
+    const r = rowOf(i), c = colOf(i);
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      if (!dr && !dc) continue;
+      const rr = r + dr, cc = c + dc;
+      if (rr < 0 || rr >= ROWS || cc < 0 || cc >= COLS) continue;
+      const j = idx(rr, cc);
+      if (!inArea[j] || !isLand[j]) continue;
+      const nd = dcur + (dr && dc ? 1.414 : 1) * (1 + 3 * Math.min(pred[j], 1));
+      if (nd < walkDist[j]) {
+        walkDist[j] = nd;
+        walkNext[j] = i;
+        if (walkable(j)) heap.push(nd, j);
+      }
+    }
+  }
+}
+
+function liveDest(from) {
+  if (walkDist[from] === 0) return from;
+  if (walkDist[from] === Infinity) return -1;
+  let k = from;
+  for (let n = 0; n < 500 && walkDist[k] > 0; n++) { k = walkNext[k]; if (k < 0) return -1; }
+  return k;
+}
+
+function liveEscapePath(from) {
+  if (walkDist[from] === Infinity) return null;
+  const path = [from];
+  let k = from;
+  while (walkDist[k] > 0 && path.length < 500) { k = walkNext[k]; if (k < 0) return null; path.push(k); }
+  return path;
+}
+
+function lockRoute(i) {
+  if (i == null || i < 0 || lockedDest[i] >= 0) return;
+  const dest = liveDest(i);
+  if (dest < 0 || dest === i) return;
+  const path = liveEscapePath(i);
+  if (!path || path.length < 2) return;
+  lockedDest[i] = dest;
+  lockedDist[i] = walkDist[i];
+  lockedPath.set(i, path);
+}
+
+function lockOpenRoutes() {
+  if (selected && selected.kind === "block") lockRoute(selected.ref);
+  for (const i of active) if (calledAt[i] >= 0) lockRoute(i);
+}
+
+function destCell(from) {
+  if (lockedDest[from] >= 0) return lockedDest[from];
+  return liveDest(from);
+}
+
+function escapePath(from) {
+  if (lockedPath.has(from)) return lockedPath.get(from);
+  return liveEscapePath(from);
+}
+
+function walkMinutes(i, slow = false) {
+  const d = lockedDest[i] >= 0 ? lockedDist[i] : walkDist[i];
+  return (d * CELL_M) / (slow ? SLOW_WALK_M_PER_MIN : WALK_M_PER_MIN);
+}
+
+function walkLabel(i) {
+  const dest = destCell(i);
+  if (dest < 0) return "no dry route";
+  if (dest === i) return "already dry";
+  return `${Math.round(walkMinutes(i))} min ${heading(i, dest)}`;
+}
+
+function clockLabel(tt) {
+  const m = place.startMin + tt;
+  const h = Math.floor(m / 60) % 24;
+  return `${h % 12 || 12}:${String(m % 60).padStart(2, "0")}${h >= 12 ? "pm" : "am"}`;
+}
+
+function durationLabel(min) {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h <= 0) return `${m} min`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+function log(text, kind = "") {
+  feed.unshift({ t, text, kind });
+  if (feed.length > 160) feed.pop();
+}
+
+function makeStorm(lat, lng, peak, radius, life, delay, speedKmMin, headingDeg) {
+  const th = headingDeg * Math.PI / 180;
+  return {
+    lat, lng, peak, radius, life, age: -delay,
+    vLat: (speedKmMin * Math.cos(th)) / KM_PER_LAT,
+    vLng: (speedKmMin * Math.sin(th)) / KM_PER_LNG,
+  };
+}
+
+function pickSpaced(candidates, count, minDist, rng) {
+  const pool = candidates.slice();
+  for (let k = pool.length - 1; k > 0; k--) { const j = Math.floor(rng() * (k + 1)); [pool[k], pool[j]] = [pool[j], pool[k]]; }
+  const out = [];
+  for (const i of pool) {
+    if (out.every(o => Math.hypot(rowOf(o) - rowOf(i), colOf(o) - colOf(i)) >= minDist)) out.push(i);
+    if (out.length === count) break;
+  }
+  return out;
+}
+
+let teamBases = [];
+
+function chooseFixedPlaces() {
+  const rng = mulberry32(place.seed);
+  const cells = Array.from(active);
+  const heights = cells.map(i => elev[i]).sort((a, b) => a - b);
+  const cut = heights[Math.floor(heights.length * 0.55)] || 12;
+  const inland = cells.filter(i => elev[i] > cut);
+  teamBases = pickSpaced(inland.length ? inland : cells, place.teams, 5, rng);
+}
+
+function clearMapPeople() {
+  for (const m of teamMarkers) map.removeLayer(m);
+  teamMarkers = [];
+  for (const [, m] of peopleMarkers) map.removeLayer(m);
+  peopleMarkers.clear();
+}
+
+function showOverview() {
+  pause();
+  currentArea = "";
+  inArea.fill(0);
+  active = new Int32Array(0);
+  areaPeople = 0;
+  teamBases = [];
+  selected = null;
+  clearMapPeople();
+  resetState();
+  map.flyTo(place.overview, place.overviewZoom, { duration: 0.7 });
+  $("play").disabled = true;
+  $("play").textContent = "Play";
+  render();
+}
+
+function setArea(key, zoomIn) {
+  currentArea = key;
+  const a = place.areas[key];
+  inArea.fill(0);
+  const list = [];
+  let people = 0;
+  for (const i of land) {
+    if (placeName(cLat[i], cLng[i]) !== a.match) continue;
+    inArea[i] = 1;
+    list.push(i);
+    people += pop[i];
+  }
+  active = Int32Array.from(list);
+  areaPeople = people;
+  if (zoomIn) map.flyTo([a.lat, a.lng], place.areaZoom, { duration: 0.8 });
+  clearMapPeople();
+  chooseFixedPlaces();
+  selected = null;
+  resetState();
+  setupMarkers();
+  refreshForecast();
+  $("play").disabled = false;
+  $("play").textContent = "Play";
+  render();
+}
+
+function resetState() {
+  t = 0;
+  storms = [];
+  depth = new Float32Array(N);
+  rainNow.fill(0); pred.fill(0); predCross.fill(Infinity); safeZone.fill(0);
+  walkDist.fill(Infinity); walkNext.fill(-1);
+  lockedDest.fill(-1); lockedDist.fill(Infinity); lockedPath.clear();
+  calledAt.fill(-1); floodedAt.fill(-1); arriveAt.fill(-1); waitSince.fill(-1);
+  moving.fill(0); noAnswer.fill(0); waiting.fill(0); safe.fill(0); rescued.fill(0);
+  feed = [];
+  lastSummary = 0;
+  waitingCleared = false;
+  lastStoryKey = "";
+  lastStoryBlock = -1;
+  chalkData = null;
+  teams = teamBases.map((cell, k) => ({ id: k + 1, lat: cLat[cell], lng: cLng[cell], state: "ready", target: -1, until: 0, nextStage: 0 }));
+  if (!currentArea) log(place.watchLog);
+  else log(`Upstairs is watching an estimated ${fmt(areaPeople)} people in ${place.many} in ${place.areas[currentArea].label}. Press Play to replay ${place.storm}, ${place.stormWhen}.`);
+}
+
+function loadStorm() {
+  if (!currentArea) return;
+  resetState();
+  const a = place.areas[currentArea];
+  storms.push(makeStorm(a.lat, a.lng, 3.9, 4.0, 150, 0, 0.12, 45));
+  storms.push(makeStorm(a.lat - 0.02, a.lng - 0.03, 3.6, 3.4, 130, 12, 0.11, 40));
+  log(`Replaying ${place.storm} over ${a.label}, ${place.stormWhen}. Rain bands up to about 4 inches per hour.`, "warn");
+  refreshForecast();
+  render();
+}
+
+function refreshForecast() {
+  rainField(storms, rainNow);
+  predict();
+  updateEscapeRoutes();
+  lockOpenRoutes();
+}
+
+function updateBlocks() {
+  let newCalls = 0, newCallBlocks = 0, topBlock = -1;
+  let secondCalls = 0, secondMovers = 0;
+  let neverLeft = 0, neverLeftBlocks = 0;
+  let stuck = 0, stuckBlocks = 0;
+  for (const i of active) {
+    if (pop[i] < 1) continue;
+    if (depth[i] >= FLOOD_FT && floodedAt[i] < 0) floodedAt[i] = t;
+
+    if (calledAt[i] < 0 && (pred[i] >= (pastFlood[i] > 0 ? 0.35 : FLOOD_FT) || depth[i] >= 0.3)) {
+      calledAt[i] = t;
+      lockRoute(i);
+      newCalls += pop[i]; newCallBlocks++;
+      if (topBlock < 0 || pop[i] > pop[topBlock]) topBlock = i;
+      const people = Math.round(pop[i]);
+      if (people < 1) continue;
+      const cantWalk = Math.round(people * SHARE_CANT_WALK);
+      const silent = Math.round(people * SHARE_NO_ANSWER);
+      const walkers = Math.max(0, people - cantWalk - silent);
+      addWaiting(i, cantWalk);
+      noAnswer[i] = silent;
+      if (silent >= 1 && waiting[i] < 1) waitSince[i] = t;
+      startWalkers(i, walkers);
+      continue;
+    }
+    if (calledAt[i] < 0) continue;
+
+    if (noAnswer[i] > 0 && t === calledAt[i] + 2) {
+      const half = Math.round(noAnswer[i] / 2);
+      secondCalls += noAnswer[i]; secondMovers += half;
+      noAnswer[i] -= half;
+      startWalkers(i, half);
+    }
+    if (noAnswer[i] > 0 && t >= calledAt[i] + STILL_LIMIT) {
+      neverLeft += noAnswer[i]; neverLeftBlocks++;
+      addWaiting(i, noAnswer[i]);
+      noAnswer[i] = 0;
+    }
+    if (moving[i] > 0 && t >= arriveAt[i]) {
+      const n = Math.round(moving[i]);
+      const trapped = Math.round(n * SHARE_STUCK);
+      const arrived = n - trapped;
+      if (arrived > 0) safe[i] += arrived;
+      if (trapped > 0) {
+        addWaiting(i, trapped);
+        stuck += trapped; stuckBlocks++;
+      }
+      moving[i] = 0;
+    }
+  }
+  if (newCallBlocks) {
+    log(`Calling ${fmt(newCalls)} people in ${place.many} on ${newCallBlocks} ${newCallBlocks === 1 ? "block" : "blocks"}, mostly in ${placeName(cLat[topBlock], cLng[topBlock])}: water expected within 30 minutes.${place.starlink ? " The call rides Starlink." : ""}`, "warn");
+  }
+  if (secondCalls >= 1) {
+    log(`Called ${fmt(secondCalls)} people again whose phones hadn't moved, twice in a row to ring through Do Not Disturb. ${fmt(secondMovers)} started moving.`, "warn");
+  }
+  if (neverLeft >= 1) {
+    log(`${fmt(neverLeft)} people on ${neverLeftBlocks} ${neverLeftBlocks === 1 ? "block" : "blocks"} got the call and never left. Rescue teams are going to them.`, "warn");
+  }
+  if (stuck >= 1) {
+    log(`${fmt(stuck)} people on ${stuckBlocks} ${stuckBlocks === 1 ? "block" : "blocks"} got stuck on the way and never made it to dry ground. They are on the rescue list.`, "warn");
+  }
+}
+
+function addWaiting(i, n) {
+  n = Math.round(n);
+  if (n <= 0) return;
+  if (waiting[i] < 1) waitSince[i] = t;
+  waiting[i] += n;
+}
+
+function startWalkers(i, n) {
+  n = Math.round(n);
+  if (n <= 0) return;
+  if (lockedDest[i] < 0 && walkDist[i] === Infinity) { addWaiting(i, n); return; }
+  const arrive = t + 2 + Math.ceil(walkMinutes(i));
+  arriveAt[i] = moving[i] > 0 ? Math.max(arriveAt[i], arrive) : arrive;
+  moving[i] += n;
+}
+
+function blockPriority(i) {
+  const n = waiting[i] + noAnswer[i];
+  const since = waitSince[i] >= 0 ? t - waitSince[i] : 0;
+  return n * (1 + Math.min(depth[i], 3)) * (1 + since / 10);
+}
+
+function anyoneWaiting() {
+  for (const i of active) if (waiting[i] >= 1 || noAnswer[i] >= 1) return true;
+  return false;
+}
+
+function anyoneLeaving() {
+  for (const i of active) if (moving[i] >= 1) return true;
+  return false;
+}
+
+function totalWaiting() {
+  let w = 0;
+  for (const i of active) w += waiting[i];
+  return w;
+}
+
+function updateTeams() {
+  const leavingOut = anyoneLeaving();
+  const claimed = new Map();
+  for (const tm of teams) if (tm.target >= 0) claimed.set(tm.target, (claimed.get(tm.target) || 0) + 1);
+
+  for (const tm of teams) {
+    if (tm.state === "onsite") {
+      if (t < tm.until) continue;
+      let n = Math.min(waiting[tm.target], TEAM_CAPACITY);
+      if (leavingOut) n = Math.min(n, Math.max(0, totalWaiting() - 1));
+      if (n >= 1) {
+        waiting[tm.target] -= n;
+        rescued[tm.target] += n;
+        log(`Team ${tm.id} got ${fmt(n)} people out of a ${place.one} in ${placeName(cLat[tm.target], cLng[tm.target])}.`, "good");
+      }
+      if (waiting[tm.target] >= 1 && !(leavingOut && totalWaiting() <= 1)) {
+        tm.until = t + TEAM_ONSITE_MIN;
+        continue;
+      }
+      claimed.set(tm.target, Math.max(0, (claimed.get(tm.target) || 1) - 1));
+      tm.state = "ready"; tm.target = -1;
+    }
+
+    if (tm.state === "ready" || tm.state === "staging") {
+      if (leavingOut && totalWaiting() <= 1) continue;
+      let best = -1, bestScore = 0;
+      for (const i of active) {
+        if (waiting[i] < 1) continue;
+        const room = waiting[i] - (claimed.get(i) || 0) * TEAM_CAPACITY;
+        if (room < 1) continue;
+        const km = Math.hypot((cLat[i] - tm.lat) * KM_PER_LAT, (cLng[i] - tm.lng) * KM_PER_LNG);
+        const score = blockPriority(i) / (1 + km / TEAM_KM_PER_MIN / 15);
+        if (score > bestScore) { bestScore = score; best = i; }
+      }
+      if (best >= 0) {
+        tm.state = "enroute"; tm.target = best;
+        claimed.set(best, (claimed.get(best) || 0) + 1);
+        const km = Math.hypot((cLat[best] - tm.lat) * KM_PER_LAT, (cLng[best] - tm.lng) * KM_PER_LNG);
+        log(`Team ${tm.id} sent to ${placeName(cLat[best], cLng[best])}: ${fmt(waiting[best])} people waiting, water ${depth[best].toFixed(1)} ft, about ${Math.max(1, Math.round(km / TEAM_KM_PER_MIN))} min away.`);
+      } else if (tm.state === "ready" && t >= tm.nextStage && storms.length && !anyoneWaiting()) {
+        stage(tm);
+      }
+    }
+
+    if (tm.state === "enroute" || tm.state === "staging") {
+      const toLat = tm.state === "enroute" ? cLat[tm.target] : tm.stageLat;
+      const toLng = tm.state === "enroute" ? cLng[tm.target] : tm.stageLng;
+      const dy = (toLat - tm.lat) * KM_PER_LAT, dx = (toLng - tm.lng) * KM_PER_LNG;
+      const km = Math.hypot(dy, dx);
+      if (km <= TEAM_KM_PER_MIN) {
+        tm.lat = toLat; tm.lng = toLng;
+        if (tm.state === "enroute") { tm.state = "onsite"; tm.until = t + TEAM_ONSITE_MIN; }
+        else tm.state = "ready";
+      } else {
+        tm.lat += (dy / km) * TEAM_KM_PER_MIN / KM_PER_LAT;
+        tm.lng += (dx / km) * TEAM_KM_PER_MIN / KM_PER_LNG;
+      }
+    }
+  }
+}
+
+function stage(tm) {
+  tm.nextStage = t + 15;
+  let best = -1, bestScore = 0;
+  for (const i of active) {
+    if (calledAt[i] >= 0 || pred[i] < 0.2) continue;
+    const score = pop[i] * pred[i];
+    if (score > bestScore) { bestScore = score; best = i; }
+  }
+  if (best < 0) return;
+  const taken = teams.some(o => o !== tm && o.state === "staging" && Math.hypot((o.stageLat - cLat[best]) * KM_PER_LAT, (o.stageLng - cLng[best]) * KM_PER_LNG) < 3);
+  if (taken) return;
+  tm.state = "staging";
+  tm.stageLat = cLat[best]; tm.stageLng = cLng[best];
+  log(`Team ${tm.id} moving into ${placeName(cLat[best], cLng[best])} before the water arrives, where the forecast shows ${place.many} about to flood.`);
+}
+
+function summarize() {
+  if (t - lastSummary < 15) return;
+  let called = 0, s = 0, w = 0, r = 0;
+  for (const i of active) { if (calledAt[i] >= 0) called += pop[i]; s += safe[i]; w += waiting[i]; r += rescued[i]; }
+  if (called < 1) return;
+  lastSummary = t;
+  log(`So far: ${fmt(called)} people called, ${fmt(s)} reached dry ground, ${fmt(r)} rescued, ${fmt(w)} waiting.`, "good");
+}
+
+function checkWaitingClear() {
+  let called = 0, w = 0, r = 0, s = 0, m = 0, na = 0;
+  for (const i of active) {
+    if (calledAt[i] >= 0) called += pop[i];
+    w += waiting[i];
+    r += rescued[i];
+    s += safe[i];
+    m += moving[i];
+    na += noAnswer[i];
+  }
+  const busy = teams.some(tm => tm.state === "enroute" || tm.state === "onsite");
+  if (called < 1 || w >= 1 || m >= 1 || na >= 1 || busy || storms.length) {
+    waitingCleared = false;
+    return;
+  }
+  if (waitingCleared) return;
+  waitingCleared = true;
+  clearInterval(timer);
+  timer = null;
+  $("play").textContent = "Done";
+  log(`Everybody is accounted for. ${fmt(s)} people walked to dry ground. ${fmt(r)} people never left, so teams pulled them out. The whole operation took ${durationLabel(t)}.`, "good");
+}
+
+function tick() {
+  t += 1;
+  advanceStorms(storms);
+  storms = storms.filter(s => s.age <= s.life);
+  rainField(storms, rainNow);
+  stepWater(depth, rainNow);
+  predict();
+  updateEscapeRoutes();
+  lockOpenRoutes();
+  updateBlocks();
+  updateTeams();
+  summarize();
+  checkWaitingClear();
+  render();
+}
+
+const map = L.map("map", { zoomControl: false, preferCanvas: true, doubleClickZoom: false });
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors · terrain: Mapzen/AWS", maxZoom: 18 }).addTo(map);
+map.fitBounds([[LAT0, LNG0], [LAT1, LNG1]], { padding: [10, 10] });
+L.control.zoom({ position: "bottomright" }).addTo(map);
+
+const floodCanvas = document.createElement("canvas");
+floodCanvas.width = COLS; floodCanvas.height = ROWS;
+const floodCtx = floodCanvas.getContext("2d");
+const floodImg = floodCtx.createImageData(COLS, ROWS);
+const floodLayer = L.imageOverlay(floodCanvas.toDataURL(), [[LAT0, LNG0], [LAT1, LNG1]], { className: "flood-layer", interactive: false }).addTo(map);
+
+const stormLayers = new Map();
+const peopleMarkers = new Map();
+const canvasRenderer = L.canvas({ padding: 0.3 });
+const goArrow = L.polyline([], { color: "#ffffff", weight: 4, opacity: 0.95, interactive: false }).addTo(map);
+const goEnd = L.circleMarker([0, 0], { radius: 9, color: "#0a0f1d", weight: 2, fillColor: HEX.green, fillOpacity: 1, interactive: false });
+const selRect = L.rectangle([[0, 0], [0, 0]], { color: "#38bdf8", weight: 3, fillColor: "#38bdf8", fillOpacity: 0.12, interactive: false }).addTo(map);
+let teamMarkers = [];
+
+let placeLabels = [];
+function renderPlaceLabels() {
+  for (const m of placeLabels) map.removeLayer(m);
+  placeLabels = [];
+  for (const b of place.labels) {
+    const m = L.marker([b.lat, b.lng], { interactive: false, opacity: 0, zIndexOffset: 200 }).addTo(map)
+      .bindTooltip(b.name, { permanent: true, direction: "center", className: "boro-label" });
+    placeLabels.push(m);
+  }
+}
+renderPlaceLabels();
+
+function heading(from, to) {
+  const dy = (cLat[to] - cLat[from]) * KM_PER_LAT, dx = (cLng[to] - cLng[from]) * KM_PER_LNG;
+  return ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"][Math.round(((Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360) / 45) % 8];
+}
+
+function paintFlood() {
+  const field = depth;
+  const stormOn = storms.length > 0;
+  const px = floodImg.data;
+  px.fill(0);
+  for (const i of active) {
+    const r = rowOf(i), c = colOf(i);
+    const k = ((ROWS - 1 - r) * COLS + c) * 4;
+    const v = field[i];
+    const nWait = waiting[i] + noAnswer[i], nMove = moving[i], nSafe = safe[i] + rescued[i];
+    const peopleSafe = nSafe >= 1 && nWait < 1 && nMove < 1;
+    let col = null, a = 0;
+    if (waitingCleared || peopleSafe) {
+      col = null;
+    } else if (v >= FLOOD_FT) { col = RED; a = 120; }
+    else if (v >= 0.2) { col = BLUE; a = 110; }
+    else if (stormOn && safeZone[i]) { col = GREEN; a = 34; }
+    if (col) { px[k] = col[0]; px[k + 1] = col[1]; px[k + 2] = col[2]; px[k + 3] = a; }
+  }
+  floodCtx.putImageData(floodImg, 0, 0);
+  floodLayer.setUrl(floodCanvas.toDataURL());
+}
+
+function renderMap() {
+  paintFlood();
+
+  const live = new Set(storms);
+  for (const [s, layer] of stormLayers) if (!live.has(s)) { map.removeLayer(layer); stormLayers.delete(s); }
+  for (const s of storms) {
+    let layer = stormLayers.get(s);
+    if (!layer) {
+      layer = L.circle([s.lat, s.lng], { radius: 1, color: "#cbd5e1", weight: 1, dashArray: "3 6", fill: false, interactive: false }).addTo(map);
+      stormLayers.set(s, layer);
+    }
+    layer.setLatLng([s.lat, s.lng]);
+    layer.setRadius(s.radius * 1400);
+    layer.setStyle({ opacity: waitingCleared ? 0 : stormEnvelope(s) > 0 ? 0.55 : 0.15 });
+  }
+
+  const seen = new Set();
+  for (const i of active) {
+    const nWait = waiting[i] + noAnswer[i], nMove = moving[i], nSafe = safe[i] + rescued[i];
+    const n = Math.max(nWait, nMove, nSafe);
+    if (n < 4) continue;
+    seen.add(i);
+    const color = waitingCleared || (nSafe >= 1 && nWait < 1 && nMove < 1) ? HEX.green : nWait >= nMove && nWait >= nSafe ? HEX.red : nMove >= nSafe ? HEX.blue : HEX.green;
+    let m = peopleMarkers.get(i);
+    if (!m) {
+      m = L.circleMarker([cLat[i], cLng[i]], { renderer: canvasRenderer, color: "#0a0f1d", weight: 1, fillOpacity: 0.92, interactive: false }).addTo(map);
+      m.bindTooltip("", { permanent: true, direction: "center", className: "count-label" });
+      peopleMarkers.set(i, m);
+    }
+    m.setStyle({ fillColor: color });
+    m.setRadius(Math.min(16, 3.5 + Math.sqrt(n) * 0.55));
+    m.setTooltipContent(fmt(n));
+  }
+  for (const [i, m] of peopleMarkers) if (!seen.has(i)) { map.removeLayer(m); peopleMarkers.delete(i); }
+
+  teams.forEach((tm, k) => teamMarkers[k].setLatLng([tm.lat, tm.lng]));
+
+  const i = selected && selected.kind === "block" ? selected.ref : -1;
+  lockRoute(i);
+  const path = i >= 0 ? escapePath(i) : null;
+  const dest = i >= 0 ? destCell(i) : -1;
+  if (i >= 0 && dest >= 0 && dest !== i && path && path.length > 1) {
+    goArrow.setLatLngs(path.map(c => [cLat[c], cLng[c]]));
+    goEnd.setLatLng([cLat[dest], cLng[dest]]);
+    if (!map.hasLayer(goEnd)) goEnd.addTo(map);
+  } else {
+    goArrow.setLatLngs([]);
+    if (map.hasLayer(goEnd)) map.removeLayer(goEnd);
+  }
+}
+
+const $ = id => document.getElementById(id);
+
+function totals() {
+  let called = 0, s = 0, w = 0, res = 0, mov = 0, lead = 0, leadW = 0;
+  for (const i of active) {
+    if (calledAt[i] >= 0) called += pop[i];
+    s += safe[i]; w += waiting[i] + noAnswer[i]; res += rescued[i]; mov += moving[i];
+    if (calledAt[i] >= 0 && floodedAt[i] >= calledAt[i]) { lead += (floodedAt[i] - calledAt[i]) * pop[i]; leadW += pop[i]; }
+  }
+  return { called, safe: s, waiting: w, rescued: res, moving: mov, lead: leadW ? lead / leadW : null };
+}
+
+function renderHeader() {
+  const T = totals();
+  if (waitingCleared) {
+    $("h-clock").textContent = durationLabel(t);
+    $("h-clock-lbl").textContent = "operation took";
+  } else {
+    $("h-clock").textContent = clockLabel(t);
+    $("h-clock-lbl").textContent = "time";
+  }
+  let peak = 0;
+  for (let i = 0; i < N; i++) if (rainNow[i] > peak) peak = rainNow[i];
+  $("h-rain").textContent = peak.toFixed(1);
+  $("h-called").textContent = fmt(T.called);
+  $("h-moving").textContent = fmt(T.moving);
+  $("h-safe").textContent = fmt(T.safe);
+  $("h-wait").textContent = fmt(T.waiting);
+  $("h-rescued").textContent = fmt(T.rescued);
+  $("h-lead").textContent = T.lead === null ? "–" : `${Math.round(T.lead)} min`;
+}
+
+function crossText(i) {
+  const c = predCross[i];
+  return c === Infinity ? "not in next 30 min" : c === 0 ? "now" : `in ~${Math.round(c)} min`;
+}
+
+function renderSelected() {
+  if (!selected || selected.kind !== "block") {
+    $("sel").innerHTML = `<div class="empty">${currentArea ? place.looking(place.areas[currentArea].label) : place.pickHint}</div>`;
+    return;
+  }
+  renderBlock(selected.ref);
+}
+
+let lastStoryKey = "";
+let lastStoryBlock = -1;
+let chalkData = null;
+const CHALK_URL = "http://127.0.0.1:8766";
+
+function storyKey(i) {
+  if (waitingCleared) return "done";
+  if (pop[i] < 1 && waiting[i] + noAnswer[i] + moving[i] + safe[i] + rescued[i] < 1) return "empty";
+  if (calledAt[i] < 0 && pred[i] < FLOOD_FT && depth[i] < 0.3) return "watch";
+  if (calledAt[i] < 0) return "warn";
+  if (waiting[i] + noAnswer[i] >= 1 && moving[i] < 1) return "rescue";
+  if (moving[i] >= 1) return waiting[i] + noAnswer[i] >= 1 ? "both" : "leaving";
+  if (waiting[i] + noAnswer[i] >= 1) return "rescue";
+  return "clear";
+}
+
+function blockStory(i) {
+  const people = fmt(pop[i]);
+  const dest = destCell(i);
+  const noRoute = dest < 0;
+  const dir = dest >= 0 && dest !== i ? heading(i, dest) : null;
+  const mins = dir ? Math.round(walkMinutes(i)) : null;
+  const when = crossText(i);
+  const floods = when !== "not in next 30 min";
+
+  let see, decide, act;
+  if (pop[i] < 1 && waiting[i] + noAnswer[i] + moving[i] + safe[i] + rescued[i] < 1) {
+    see = `No one lives in a ${place.one} on this block.`;
+    decide = "Chalk has nothing to watch here.";
+    act = "We do not call. We do not send a team.";
+  } else {
+    see = `About ${people} people live in ${place.many} here, ${elev[i].toFixed(0)} feet above the water line.${pastFlood[i] >= 1 ? ` This street has flooded before.` : ""} ${place.rainNote} It is ${rainNow[i].toFixed(1)} inches an hour.`;
+    if (waitingCleared) {
+      decide = "Chalk is done with this block. Everyone is accounted for.";
+      act = `${fmt(safe[i])} walked to dry ground.${rescued[i] >= 1 ? ` ${fmt(rescued[i])} never left, so a team pulled them out.` : ""}`;
+    } else if (calledAt[i] < 0 && !floods && depth[i] < 0.3) {
+      decide = `Chalk does not see this ${place.one} flooding in the next 30 minutes.`;
+      act = "Nobody here is called. We keep watching.";
+    } else if (calledAt[i] < 0) {
+      decide = `Chalk says this ${place.one} floods ${when}. That is soon enough that a notification is not enough.`;
+      act = `We call everyone here${place.starlink ? " on Starlink" : ""}${dir ? ` and tell them to walk ${dir}, about ${mins} minutes, to dry ground` : " but there is no dry walk, so they go on the rescue list"}.`;
+    } else if (waiting[i] + noAnswer[i] >= 1 && moving[i] < 1) {
+      decide = "They already got the call. Their phones never moved.";
+      act = `Rescue is going to this ${place.one}.${place.starlink ? " Dispatch rides Starlink because there is no cell." : ""}`;
+    } else if (moving[i] >= 1 && dir) {
+      decide = "They got the call and started to leave.";
+      act = `The white line is the path they were told: ${dir}, about ${mins} minutes, to the closest ground that stays dry. That destination does not change. Anyone who does not move goes to rescue.`;
+    } else {
+      decide = `This ${place.one} was in the flood path.`;
+      act = `${fmt(safe[i])} reached dry ground.${rescued[i] >= 1 ? ` ${fmt(rescued[i])} were pulled out.` : ""} Nobody is left waiting.`;
+    }
+  }
+  return { see, decide, act };
+}
+
+function paintStory(i) {
+  const box = $("chalk-box");
+  if (!box) return;
+  const key = storyKey(i);
+  if (key === lastStoryKey && lastStoryBlock === i) return;
+  lastStoryKey = key;
+  lastStoryBlock = i;
+  const s = blockStory(i);
+  box.innerHTML = `<div class="lbl">What is happening on this block</div>
+    <div class="story">
+      <p class="step"><span class="k">1 · Who is here</span>${s.see}</p>
+      <p class="step"><span class="k">2 · What Chalk sees</span>${s.decide}</p>
+      <p class="step"><span class="k">3 · What we do</span>${s.act}</p>
+    </div>`;
+}
+
+function renderBlock(i) {
+  const where = placeName(cLat[i], cLng[i]);
+  const called = calledAt[i] >= 0;
+  const state = !isLand[i] ? "Water" : depth[i] >= FLOOD_FT ? "Flooding" : pred[i] >= FLOOD_FT ? "Will flood" : safeZone[i] && storms.length ? "Stays dry" : "Dry";
+  const color = waitingCleared || state === "Stays dry" || state === "Dry" ? HEX.green : state === "Flooding" ? HEX.red : HEX.blue;
+  if (!isLand[i]) { $("sel").innerHTML = `<div class="empty">That's open water. Rivers and the bay drain floodwater away from the city.</div>`; return; }
+  const rebuild = lastStoryBlock !== i;
+  if (rebuild) {
+    lastStoryKey = "";
+    $("sel").innerHTML = `
+      <div class="sel-title"><b>City block in ${where}</b><span class="pill" style="background:${color}22;color:${color}">${state}</span></div>
+      <div class="phone" id="chalk-box"></div>
+      <div class="factors">
+        <span>People in ${place.many}</span><span id="f-pop">${fmt(pop[i])}</span>
+        <span>Ground height</span><span id="f-elev">${elev[i].toFixed(0)} ft</span>
+        <span>Walk to dry ground</span><span id="f-walk">${walkLabel(i)}</span>
+      </div>
+      <div class="flow" id="block-flow" style="${called ? "" : "display:none"}">
+        <div><b style="color:var(--blue)" id="f-move">${fmt(moving[i])}</b><span>leaving now</span></div>
+        <div><b style="color:var(--green)" id="f-safe">${fmt(safe[i])}</b><span>reached dry ground</span></div>
+        <div><b style="color:var(--red)" id="f-wait">${fmt(waiting[i] + noAnswer[i])}</b><span>waiting for rescue</span></div>
+        <div><b style="color:var(--green)" id="f-res">${fmt(rescued[i])}</b><span>rescued</span></div>
+      </div>`;
+    fetchChalk(i);
+  } else {
+    const pill = document.querySelector("#sel .pill");
+    if (pill) { pill.textContent = state; pill.style.background = color + "22"; pill.style.color = color; }
+    const flow = $("block-flow");
+    if (flow) {
+      flow.style.display = called ? "" : "none";
+      $("f-move").textContent = fmt(moving[i]);
+      $("f-safe").textContent = fmt(safe[i]);
+      $("f-wait").textContent = fmt(waiting[i] + noAnswer[i]);
+      $("f-res").textContent = fmt(rescued[i]);
+    }
+    const walkEl = $("f-walk");
+    if (walkEl) walkEl.textContent = walkLabel(i);
+  }
+  paintStory(i);
+}
+
+function fetchChalk(i) {
+  const walk = destCell(i) < 0 ? -1 : walkMinutes(i);
+  const url = `${CHALK_URL}/block?` + new URLSearchParams({
+    lat: String(cLat[i]),
+    lng: String(cLng[i]),
+    elev: String(elev[i]),
+    rain: String(rainNow[i]),
+    sewer: String(cap[i]),
+    past: String(pastFlood[i]),
+    depth: String(depth[i]),
+    walk: String(walk),
+  });
+  fetch(url).then(r => r.json()).then(d => {
+    if (!selected || selected.ref !== i) return;
+    chalkData = d;
+    lastStoryKey = "";
+    paintStory(i);
+  }).catch(() => {});
+}
+
+function renderTeams() {
+  const busy = teams.filter(tm => tm.state === "enroute" || tm.state === "onsite").length;
+  const staging = teams.filter(tm => tm.state === "staging").length;
+  $("teams").innerHTML = `<b>${busy}</b> of ${teams.length} teams on a rescue · <b>${staging}</b> moving ahead of the flood · <b>${teams.length - busy - staging}</b> ready`;
+  const list = Array.from(active).filter(i => waiting[i] >= 1 || noAnswer[i] >= 1).sort((a, b) => blockPriority(b) - blockPriority(a));
+  $("queueCount").textContent = list.length ? `${list.length} blocks waiting` : "";
+  $("queue").innerHTML = list.length
+    ? list.slice(0, 7).map((i, k) => {
+        const why = [`${fmt(waiting[i] + noAnswer[i])} people`, depth[i] >= 0.05 ? `water ${depth[i].toFixed(1)} ft` : "water coming", `waiting ${Math.max(0, t - waitSince[i])} min`];
+        const covered = teams.some(tm => tm.target === i);
+        return `<div class="q" data-i="${i}"><span class="rank">#${k + 1}</span><span>${placeName(cLat[i], cLng[i])}${covered ? " · team on the way" : ""}</span><span class="sc">${fmt(blockPriority(i))}</span><span class="why">${why.join(" · ")}</span></div>`;
+      }).join("")
+    : `<div class="empty">${waitingCleared ? `Nobody left in a ${place.one}. People either walked out or a team pulled them out.` : "Teams go after anyone who got the call and never left, even while other people are still walking out. Deepest water and longest wait go first."}</div>`;
+  for (const el of $("queue").querySelectorAll(".q")) el.onclick = () => {
+    const i = Number(el.dataset.i);
+    selected = { kind: "block", ref: i };
+    lockRoute(i);
+    map.panTo([cLat[i], cLng[i]]);
+    render();
+  };
+}
+
+function renderFeed() {
+  $("feed").innerHTML = feed.map(f => `<div class="${f.kind}"><time>${clockLabel(f.t)}</time>${f.text}</div>`).join("");
+}
+
+function renderSelection() {
+  if (!selected || selected.kind !== "block") {
+    selRect.setStyle({ opacity: 0, fillOpacity: 0 });
+    return;
+  }
+  const r = rowOf(selected.ref), c = colOf(selected.ref);
+  selRect.setBounds([[LAT0 + r * D_LAT, LNG0 + c * D_LNG], [LAT0 + (r + 1) * D_LAT, LNG0 + (c + 1) * D_LNG]]);
+  selRect.setStyle({ opacity: 1, fillOpacity: 0.12 });
+}
+
+function render() {
+  renderMap();
+  renderHeader();
+  renderSelected();
+  renderTeams();
+  renderFeed();
+  renderSelection();
+}
+
+function play() {
+  if (timer) return pause();
+  if (!currentArea) return;
+  if (!storms.length) loadStorm();
+  $("play").textContent = "Pause";
+  timer = setInterval(tick, TICK_MS);
+}
+
+function pause() {
+  clearInterval(timer);
+  timer = null;
+  $("play").textContent = "Play";
+}
+
+function cellAt(lat, lng) {
+  const r = Math.floor((lat - LAT0) / D_LAT), c = Math.floor((lng - LNG0) / D_LNG);
+  if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return -1;
+  return idx(r, c);
+}
+
+function areaKeyFor(i) {
+  const name = placeName(cLat[i], cLng[i]);
+  return Object.keys(place.areas).find(k => place.areas[k].match === name) || "";
+}
+
+map.on("click", e => {
+  const i = cellAt(e.latlng.lat, e.latlng.lng);
+  if (i < 0 || !isLand[i]) return;
+  const key = areaKeyFor(i);
+  if (!key) return;
+  if (key !== currentArea) {
+    $("area").value = key;
+    setArea(key, true);
+  }
+  selected = { kind: "block", ref: i };
+  lockRoute(i);
+  render();
+});
+
+function setupMarkers() {
+  teamMarkers = teams.map(tm => L.marker([tm.lat, tm.lng], {
+    icon: L.divIcon({ className: "", html: `<div class="team-icon">${tm.id}</div>`, iconSize: [16, 15], iconAnchor: [8, 7] }),
+    zIndexOffset: 900, interactive: false,
+  }).addTo(map));
+}
+
+function fullReset() {
+  pause();
+  resetState();
+  selected = null;
+  refreshForecast();
+  render();
+}
+
+function fillAreaSelect() {
+  const sel = $("area");
+  sel.innerHTML = `<option value="">${place.overviewLabel}</option>` +
+    Object.entries(place.areas).map(([k, a]) => `<option value="${k}">${a.label}</option>`).join("");
+}
+
+function fillPlaceSelect() {
+  $("place").innerHTML = Object.values(PLACES).map(p => `<option value="${p.id}">${p.menuLabel}</option>`).join("");
+  $("place").value = place.id;
+}
+
+function showStart() {
+  pause();
+  $("start").classList.remove("hide");
+}
+
+async function enterApp(id) {
+  $("start").classList.add("hide");
+  $("place").value = id;
+  if (place.id !== id) await setPlace(id);
+}
+
+function applyPlaceCopy() {
+  $("brand-sub").textContent = place.sub;
+  $("lbl-moving").textContent = place.leaving;
+  $("lg-leaving").textContent = place.leaving.replace(/^l/, "L");
+  $("foot-note").textContent = place.note;
+}
+
+async function setPlace(id) {
+  pause();
+  $("play").disabled = true;
+  $("play").textContent = "Loading…";
+  $("area").disabled = true;
+  $("place").disabled = true;
+  clearMapPeople();
+  place = PLACES[id] || PLACES.nyc;
+  applyBounds();
+  floodLayer.setBounds([[LAT0, LNG0], [LAT1, LNG1]]);
+  map.fitBounds([[LAT0, LNG0], [LAT1, LNG1]], { padding: [10, 10] });
+  elev.fill(0); isLand.fill(0); pop.fill(0); cap.fill(0); pastFlood.fill(0);
+  land = new Int32Array(0);
+  try {
+    await loadElevation();
+    buildCity();
+  } catch (err) {
+    $("play").textContent = "Couldn't load";
+    $("place").disabled = false;
+    return;
+  }
+  applyPlaceCopy();
+  fillPlaceSelect();
+  fillAreaSelect();
+  renderPlaceLabels();
+  showOverview();
+  $("play").textContent = "Play";
+  $("reset").disabled = false;
+  $("area").disabled = false;
+  $("place").disabled = false;
+  if (place.use311) loadPastFloods().then(() => { if (!timer) { refreshForecast(); render(); } }).catch(() => {});
+  else { markCreekFloods(); if (!timer) { refreshForecast(); render(); } }
+}
+
+$("play").onclick = play;
+$("place").onchange = e => setPlace(e.target.value);
+$("area").onchange = e => {
+  pause();
+  if (!e.target.value) showOverview();
+  else setArea(e.target.value, true);
+};
+$("reset").onclick = fullReset;
+$("brand").onclick = showStart;
+$("pick-cities").onclick = () => enterApp("nyc");
+$("pick-rural").onclick = () => enterApp("hindman");
+
+(async () => {
+  applyPlaceCopy();
+  fillPlaceSelect();
+  fillAreaSelect();
+  try {
+    await loadElevation();
+    buildCity();
+    showOverview();
+    $("play").textContent = "Play";
+    $("reset").disabled = false;
+    $("area").disabled = false;
+  } catch (err) {
+    $("play").textContent = "Couldn't load";
+    return;
+  }
+  loadPastFloods().then(() => { if (!timer) { refreshForecast(); render(); } }).catch(() => {});
+})();
+</script>
+</body>
+</html>
